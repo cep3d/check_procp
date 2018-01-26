@@ -1,0 +1,96 @@
+#!/usr/bin/php
+<?php
+define('NAME', 'mysql');
+define('USER', 'root');
+define('PASS', '');
+
+function send_mail($message) {
+  $addr = 'cepharos@gmail.com';
+  $sub = 'Checked proc';
+  $headers[] = 'From: Check proc<no-reply@localhost>';
+  $headers[] = 'X-Mailer: PHP/'.phpversion();
+  $header = implode("\r\n", $headers);
+
+  mail($addr, $sub, $message, $header);
+}
+
+function log_data($mode) {
+  empty($mode) and $mode = 'access';
+  $logfile = "/var/www/html/logs/{$mode}_log";
+  $excludes = "(.gif|.jpg|.png|.swf|.ico|.txt|.xml|.css|.js|.rss)";
+  $num = 100;
+  $cmd = "cat {$logfile} | egrep -v \"{$excludes}\" | tail -n {$num}";
+
+  $result = shell_exec($cmd);
+  return $result;
+}
+
+function mysql_log() {
+  $logfile = "/var/log/mysqld.log";
+  $num = 100;
+  $cmd = "cat {$logfile} | tail -n {$num}";
+  $result = shell_exec($cmd);
+  return $result;
+}
+
+
+function check_httpd($url = '') {
+  $ch = curl_init();
+
+  $curl_options = array(
+    CURLOPT_URL => $url,
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_FAILONERROR => false,
+    CURLOPT_CONNECTTIMEOUT => 120,
+    CURLOPT_HEADER => false,
+  );
+
+  curl_setopt_array($ch, $curl_options);
+  curl_exec($ch);
+
+  $errno = curl_errno($ch);
+  $errst = curl_error($ch);
+
+  $accdata = log_data("access");
+  $errdata = log_data("error");
+
+  if ($errno !== CURLE_OK) {
+    system('service httpd restart');
+    $msg = 'Error: '. $errst. "\n";
+    $msg .= 'Error Code: '. $errno. "\n";
+    $msg .= 'Restart service for httpd';
+    $msg .= "\n\n";
+    $msg .= "Retrieve lastest logs from the access log\n";
+    $msg .= "==============================================\n";
+    $msg .= $accdata;
+    $msg .= "\n\n";
+    $msg .= "Retrieve lastest logs from the error log\n";
+    $msg .= "==============================================\n";
+    $msg .= $errdata;
+    $msg .= "\n\n";
+    send_mail($msg);
+  }
+
+  curl_close($ch);
+}
+
+function check_mysql() {
+  $con = mysqli_connect('localhost', USER, PASS);
+  if ($con->connect_errno) {
+    $logstr = mysql_log();
+    system('service mysqld restart');
+    $msg = 'Error Code: '. $con->connect_errrno. "\n";
+    $msg .= 'Restart service for mysqld';
+    $msg .= "\n\n";
+    $msg .= "Retrieve lastest logs from the mysqld log\n";
+    $msg .= "==============================================\n";
+    $msg .= $logstr;
+    send_mail($msg);
+    exit;
+  }
+
+  $con->select_db(NAME);
+}
+
+check_httpd('http://google.co.jp');
+check_mysql();
